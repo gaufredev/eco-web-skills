@@ -48,7 +48,7 @@ Checked against sources in 2026 (see "Honest limits" below for the details). Cla
 - "Static uses 60× less server energy" is only half true: in a UCLouvain thesis (Jungers 2025) WordPress *with a good page cache* used about as little energy as the static site. The real difference is in requests a cache can't answer (bots trying the login page, admin, cron) — and in security and maintenance.
 - Deleting files doesn't close data centres: storage is ~5% of data-centre electricity (IEA). Clean up for security and simplicity, not for a big energy claim.
 - "Static" ≠ light: static sites built with heavy JS frameworks (Next.js, Nuxt) are about as heavy as WordPress in the median (Web Almanac 2024).
-- If an AI assistant did the work, disclose its energy too (an AI site conversion was estimated at ~1.4 kWh; a full new site ~18 kWh, from token counts — half to double either way).
+- If an AI assistant did the work, disclose its energy too (an AI site conversion was estimated at ~1.4 kWh; six months of AI work adding pages and features to a seven-language site ~18 kWh, mostly long sessions re-reading their own context — keep sessions short and use ready-made skills; estimates from token counts, half to double either way). Show build vs running: building is once, running comes back every year — at 10,000 visits/month a 3 MB page costs ~106 kWh/yr in visits alone (SWD), a 0.3 MB page ~11.
 
 ### Speed = Sustainability + Good Business
 
