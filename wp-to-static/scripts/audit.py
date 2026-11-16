@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Load every page in headless Chromium, scroll to the bottom, and record what
 it downloads: bytes on the wire, request count, DOM size, EcoIndex grade.
-Also writes used.txt, the local files any page actually requested.
+Also writes used-desktop.txt or used-mobile.txt (the local files any page
+actually requested; prune.py reads both) and requests-<mode>.tsv.
 
 Usage: <venv>/bin/python -I audit.py <base_url> <site_dir> [--mobile]
 """
@@ -31,10 +32,23 @@ def ecoindex(dom, req, kb):
     return round(score), grade
 
 
+def in_wp_dir(path, site):
+    """True for files under wp-content/, wp-includes/ … of the site. Checks the
+    path *inside* the site folder only, so a project path like ~/wp-sites/ is fine."""
+    rel = os.path.relpath(path, site)
+    return rel.split(os.sep)[0].startswith("wp-")
+
+
+def page_url(root, site):
+    """URL path of the folder holding an index.html ("/" for the site root)."""
+    rel = os.path.relpath(root, site)
+    return "/" if rel == "." else "/" + rel.replace(os.sep, "/").strip("/") + "/"
+
+
 def pages(site):
     for root, _, files in os.walk(site):
-        if "index.html" in files and "/wp-" not in root:
-            yield "/" + os.path.relpath(root, site).replace(".", "").strip("/") + "/"
+        if "index.html" in files and not in_wp_dir(root, site):
+            yield page_url(root, site)
 
 
 def main(base, site, mobile):
@@ -46,7 +60,6 @@ def main(base, site, mobile):
         browser = p.chromium.launch()
         ctx = browser.new_context(**(p.devices["iPhone 13"] if mobile else {"viewport": {"width": 1440, "height": 900}}))
         for path in sorted(set(pages(site))):
-            path = path.replace("//", "/")
             page = ctx.new_page()
             cdp = ctx.new_cdp_session(page)
             cdp.send("Network.enable")
@@ -79,10 +92,13 @@ def main(base, site, mobile):
             totals["n"] += 1
             page.close()
         browser.close()
+    if not totals["n"]:
+        sys.exit(f"No pages found under {site}")
     print(f"average {totals['kb'] / totals['n']:.0f} KB over {totals['n']} pages")
-    with open("requests.tsv", "w", encoding="utf-8") as f:
+    mode = "mobile" if mobile else "desktop"
+    with open(f"requests-{mode}.tsv", "w", encoding="utf-8") as f:
         f.write("\n".join(rows) + "\n")
-    with open("used.txt", "w", encoding="utf-8") as f:
+    with open(f"used-{mode}.txt", "w", encoding="utf-8") as f:
         f.write("\n".join(sorted(used)) + "\n")
 
 

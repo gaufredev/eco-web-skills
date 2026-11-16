@@ -23,8 +23,12 @@ import sys
 import urllib.request
 from urllib.parse import unquote
 
+DOMAIN = "example.com"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.path.join(HERE, "cache", "youtube")
+# Images whose WebP wasn't worth keeping, so later runs don't re-encode them.
+# Kept outside the site folder: prune.py would delete marker files inside it.
+NO_WEBP = os.path.join(HERE, "cache", "no-webp.txt")
 POSTERS = "wp-content/uploads/video-posters"
 
 PROTECT = re.compile(
@@ -34,9 +38,12 @@ PROTECT = re.compile(
     r'|<script[^>]+type=["\']application/ld\+json["\'][^>]*>.*?</script>',
     re.S | re.I,
 )
-IMG_RE = re.compile(r'((?:https://example\.com)?/wp-content/uploads/[^"\'\s()<>,;]+?\.(?:jpe?g|png))(?![\w.])', re.I)
+IMG_RE = re.compile(r'((?:https://' + re.escape(DOMAIN) + r')?/wp-content/uploads/[^"\'\s()<>,;]+?\.(?:jpe?g|png))(?![\w.])', re.I)
 
-IFRAME_RE = re.compile(r'<iframe src="https://www\.youtube\.com/embed/([\w-]{11})[^"]*"[^>]*></iframe>')
+# Any attribute order (WordPress's own oEmbed puts title/width/height before src),
+# www or not, youtube.com or youtube-nocookie.com.
+IFRAME_RE = re.compile(
+    r'<iframe\b[^>]*?\bsrc="https?://(?:www\.)?youtube(?:-nocookie)?\.com/embed/([\w-]{11})[^"]*"[^>]*>\s*</iframe>', re.I)
 VIDEOJS_RE = re.compile(r'<video[^>]*data-vsetup="[^"]*?(?:youtu\.be|watch\?v=)\\?/?([\w-]{11})[^"]*"[^>]*></video>')
 VIDEO_SCRIPTS = re.compile(
     r'<script[^>]+src="[^"]*/(?:video-js/video|vimeo/player|kalium-videojs-youtube-js)\.min\.js[^"]*"[^>]*></script>\s*')
@@ -72,13 +79,18 @@ def fetch(url):
 
 
 def youtube_meta(vid):
-    """Title and a local WebP poster for a video, cached across builds."""
+    """Title and a local JPG thumbnail for a video, cached across builds.
+    Returns (title, None) when no thumbnail can be fetched."""
     os.makedirs(CACHE, exist_ok=True)
     meta_path = os.path.join(CACHE, vid + ".json")
     if not os.path.exists(meta_path):
-        meta = json.loads(fetch(f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json"))
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump({"title": meta["title"]}, f, ensure_ascii=False)
+        try:
+            meta = json.loads(fetch(f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json"))
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump({"title": meta["title"]}, f, ensure_ascii=False)
+        except Exception as e:  # private, removed or embedding disabled: no title, try the thumbnail anyway
+            print(f"warning: no oEmbed data for video {vid} ({e})")
+    title = json.load(open(meta_path, encoding="utf-8"))["title"] if os.path.exists(meta_path) else ""
     jpg = os.path.join(CACHE, vid + ".jpg")
     if not os.path.exists(jpg):
         for size in ("maxresdefault", "sddefault", "hqdefault"):
@@ -86,10 +98,11 @@ def youtube_meta(vid):
                 data = fetch(f"https://i.ytimg.com/vi/{vid}/{size}.jpg")
             except Exception:
                 continue
-            with open(jpg, "wb") as f:
+            with open(jpg + ".part", "wb") as f:
                 f.write(data)
+            os.replace(jpg + ".part", jpg)
             break
-    return json.load(open(meta_path, encoding="utf-8"))["title"], jpg
+    return title, (jpg if os.path.exists(jpg) else None)
 
 
 def poster(site, vid, jpg):
@@ -97,47 +110,80 @@ def poster(site, vid, jpg):
     out = os.path.join(site, rel)
     if not os.path.exists(out):
         os.makedirs(os.path.dirname(out), exist_ok=True)
-        subprocess.run(["cwebp", "-quiet", "-q", "78", "-resize", "1280", "0", "-metadata", "none", jpg, "-o", out],
+        subprocess.run(["cwebp", "-quiet", "-q", "78", "-resize", "1280", "0", "-metadata", "none", jpg, "-o", out + ".part"],
                        check=True)
+        os.replace(out + ".part", out)
     return "/" + rel
 
 
 def facade(site, vid, style):
+    """Click-to-play markup, or None (embed left as it was) when no thumbnail exists."""
     title, jpg = youtube_meta(vid)
+    if jpg is None:
+        print(f"warning: no thumbnail for video {vid}; its embed is left unchanged")
+        return None
     src = poster(site, vid, jpg)
-    label = htmllib.escape(f"Play video: {title}", quote=True)
-    overlay = (f'<span class="ytf__title">{htmllib.escape(title)}</span>{YT_PLAY}' if style == "yt" else VJS_PLAY)
+    label = htmllib.escape(f"Play video: {title}" if title else "Play video", quote=True)
+    overlay = (f'<span class="ytf__title">{htmllib.escape(title)}</span>{YT_PLAY}' if style == "yt" and title
+               else YT_PLAY if style == "yt" else VJS_PLAY)
     return (f'<button type="button" class="ytf ytf--{style}" data-yt="{vid}" aria-label="{label}">'
             f'<img src="{src}" alt="" width="1280" height="720" loading="lazy" decoding="async">{overlay}</button>')
 
 
+_no_webp = None
+
+
+def no_webp():
+    global _no_webp
+    if _no_webp is None:
+        _no_webp = set(open(NO_WEBP, encoding="utf-8").read().split("\n")) if os.path.exists(NO_WEBP) else set()
+    return _no_webp
+
+
+def remember_no_webp(path):
+    no_webp().add(path)
+    os.makedirs(os.path.dirname(NO_WEBP), exist_ok=True)
+    with open(NO_WEBP, "w", encoding="utf-8") as f:
+        f.write("\n".join(sorted(p for p in no_webp() if p)) + "\n")
+
+
 def webp_for(site, ref):
     """Path of a usable WebP sibling for an uploaded image ref, or None."""
-    path = unquote(ref.split("example.com", 1)[-1]).lstrip("/")
+    path = unquote(ref.split(DOMAIN, 1)[-1]).lstrip("/")
     src = os.path.join(site, path)
     out = src + ".webp"
+    if os.path.exists(out) and os.path.getsize(out) == 0:
+        os.remove(out)  # empty marker from an older version of this script
+        remember_no_webp(path)
+    if path in no_webp():
+        return None
     if not os.path.exists(out):
         if not os.path.exists(src):
             return None
         encode(src, out)
         if os.path.getsize(out) > 0.9 * os.path.getsize(src):
-            # Not worth it: leave an empty marker so the next build doesn't retry.
-            open(out, "wb").close()
-    return ref + ".webp" if os.path.getsize(out) > 0 else None
+            os.remove(out)  # not worth it; remember so the next build doesn't retry
+            remember_no_webp(path)
+            return None
+    return ref + ".webp"
 
 
 def encode(src, out):
     """JPEGs lossy. PNGs both ways: lossless keeps logos and line art exact and
     wins unless the PNG is really a photo (e.g. a screenshot of one)."""
+    # Write to .part files and rename at the end: an interrupted run must never
+    # leave a half-written .webp that later runs would trust.
     base = ["cwebp", "-quiet", "-mt", "-metadata", "none"]
-    subprocess.run([*base, "-q", "82", "-alpha_q", "100", src, "-o", out], check=True)
+    lossy = out + ".part"
+    subprocess.run([*base, "-q", "82", "-alpha_q", "100", src, "-o", lossy], check=True)
     if src.lower().endswith(".png"):
-        lossless = out + ".tmp"
+        lossless = out + ".lossless.part"
         subprocess.run([*base, "-lossless", "-z", "9", src, "-o", lossless], check=True)
-        if os.path.getsize(lossless) <= 1.3 * os.path.getsize(out):
-            os.replace(lossless, out)
+        if os.path.getsize(lossless) <= 1.3 * os.path.getsize(lossy):
+            os.replace(lossless, lossy)
         else:
             os.remove(lossless)
+    os.replace(lossy, out)
 
 
 def rewrite_images(site, text):
@@ -155,8 +201,9 @@ def rewrite_images(site, text):
 def process_html(site, path):
     html = open(path, encoding="utf-8").read()
     has_video = bool(IFRAME_RE.search(html) or VIDEOJS_RE.search(html))
-    html = IFRAME_RE.sub(lambda m: facade(site, m.group(1), "yt"), html)
-    html = VIDEOJS_RE.sub(lambda m: facade(site, m.group(1), "vjs"), html)
+    html = IFRAME_RE.sub(lambda m: facade(site, m.group(1), "yt") or m.group(0), html)
+    html = VIDEOJS_RE.sub(lambda m: facade(site, m.group(1), "vjs") or m.group(0), html)
+    has_video = has_video and "ytf ytf--" in html
     if has_video:
         # The theme loads YouTube's iframe API for any .video-youtube wrapper.
         html = html.replace('class="image-placeholder video video-youtube"', 'class="image-placeholder video"')
@@ -174,14 +221,14 @@ def main(site):
         for name in files:
             path = os.path.join(root, name)
             # Generated pages only; root extras like naver*.html stay byte for byte.
-            if name in ("index.html", "404.html") and "/wp-" not in path:
+            if name in ("index.html", "404.html") and not os.path.relpath(path, site).split(os.sep)[0].startswith("wp-"):
                 process_html(site, path)
             elif name.endswith(".css") and "siteground-optimizer-assets" in path:
-                css = open(path, encoding="utf-8").read().replace("https://example.com/", "/")
+                css = open(path, encoding="utf-8").read().replace(f"https://{DOMAIN}/", "/")
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(rewrite_images(site, css))
     left = [n for r, _, fs in os.walk(site) for n in fs
-            if n.endswith(".html") and ("youtube.com/embed" in open(os.path.join(r, n), encoding="utf-8").read())]
+            if n.endswith(".html") and IFRAME_RE.search(open(os.path.join(r, n), encoding="utf-8").read())]
     print("pages still embedding YouTube directly:", left or "none")
 
 

@@ -29,6 +29,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     }
 
     def send_head(self):
+        self._remaining = None  # never carry a byte count over to the next request
         rng = self.headers.get("Range")
         path = self.translate_path(self.path)
         if os.path.isdir(path) and os.path.isfile(os.path.join(path, "index.html")) and self.path.split("?")[0].endswith("/"):

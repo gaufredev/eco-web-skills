@@ -5,8 +5,9 @@ Usage: python3 -I prune.py <site_dir> [--apply]
 
 Kept: anything referenced from the HTML (src, srcset, lightbox links, inline
 JSON), anything a kept stylesheet points at with url(), and anything listed in
-used-*.txt (files the browser requested in audit.py runs, which covers what
-scripts load on their own). Without --apply it only reports.
+used-*.txt (used-desktop.txt / used-mobile.txt: files the browser requested in
+audit.py runs, which covers what scripts load on their own). Without --apply it
+only reports; --apply refuses to run without any used-*.txt.
 """
 import glob
 import os
@@ -22,6 +23,13 @@ CSS_URL = re.compile(r'url\(\s*["\']?([^"\')]+)["\']?\s*\)')
 TOP = ("wp-content/", "wp-includes/")
 
 
+def in_wp_dir(path, site):
+    """True for files under wp-content/, wp-includes/ … of the site. Checks the
+    path *inside* the site folder only, so a project path like ~/wp-sites/ is fine."""
+    rel = os.path.relpath(path, site)
+    return rel.split(os.sep)[0].startswith("wp-")
+
+
 def nfc(path):
     return unicodedata.normalize("NFC", path)
 
@@ -29,7 +37,7 @@ def nfc(path):
 def html_refs(site):
     refs = set()
     for root, _, files in os.walk(site):
-        if "/wp-" in root:
+        if in_wp_dir(root, site):
             continue
         for name in files:
             if name.endswith(".html"):
@@ -52,7 +60,11 @@ def css_refs(site, css):
 
 def main(site, apply):
     keep = html_refs(site)
-    for f in glob.glob("used-*.txt"):
+    used_files = glob.glob("used-*.txt")
+    if apply and not used_files:
+        sys.exit("No used-*.txt here: run audit.py (desktop and --mobile) from this folder first, "
+                 "or files loaded only by scripts get deleted.")
+    for f in used_files:
         keep.update(l.strip() for l in open(f, encoding="utf-8") if l.strip().startswith(TOP))
     todo = [k for k in keep if k.endswith(".css")]
     while todo:

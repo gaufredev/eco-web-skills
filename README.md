@@ -5,7 +5,7 @@ Two skills I use with [Claude Code](https://claude.com/claude-code) to make webs
 - **[eco-web](eco-web/SKILL.md)**: a guide to eco web design, from five-minute fixes (fonts, images, video embeds, trackers) to hosting and architecture. It includes Korean font weights, Korean hosting, where to put your server, and an honest list of what lighter websites *don't* do.
 - **[wp-to-static](wp-to-static/SKILL.md)**: moves a live WordPress site to plain static pages on the same host while keeping its design: crawl, rebuild, lighten, check pixel by pixel, swap and clean up. The [scripts](wp-to-static/scripts/) are templates from a real conversion. Edit the constants at the top (`example.com`, SSH alias, removed items) before running them.
 
-On the three sites converted so far, pages became 60–70% lighter and the server folders shrank from gigabytes to megabytes. The numbers, and what they do and don't mean, are on my guide **[A lighter website](https://julianquintart.com/eco-web/en/)** ([한국어](https://julianquintart.com/eco-web/)).
+On the two sites measured before and after, pages became 60–70% lighter (2,219 → 727 KB and 1,324 → 517 KB per page on average), and one server folder went from 3.1 GB to 134 MB. The numbers, and what they do and don't mean, are on my guide **[A lighter website](https://julianquintart.com/eco-web/en/)** ([한국어](https://julianquintart.com/eco-web/)).
 
 ## Install
 

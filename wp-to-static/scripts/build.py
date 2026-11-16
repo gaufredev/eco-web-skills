@@ -51,6 +51,19 @@ PROTECT = re.compile(
 ASSET_RE = re.compile(r'/(?:wp-content|wp-includes)/[^"\'\s<>()\\,?&#]+')
 
 
+def in_wp_dir(path, site):
+    """True for files under wp-content/, wp-includes/ … of the site. Checks the
+    path *inside* the site folder only, so a project path like ~/wp-sites/ is fine."""
+    rel = os.path.relpath(path, site)
+    return rel.split(os.sep)[0].startswith("wp-")
+
+
+def page_url(root, site):
+    """URL path of the folder holding an index.html ("/" for the site root)."""
+    rel = os.path.relpath(root, site)
+    return "/" if rel == "." else "/" + rel.replace(os.sep, "/").strip("/") + "/"
+
+
 def div_end(html: str, start: int) -> int:
     """Index just past the </div> that closes the <div> opening at start."""
     depth = 0
@@ -77,6 +90,9 @@ def grid_order(work_html: str) -> list:
 
 def fix_nav(html: str, slug: str, order: list) -> str:
     """Previous = next tile in the grid, Next = previous tile (as on the live site)."""
+    if slug not in order:
+        print(f"warning: work/{slug}/ is not in the Work grid; prev/next links left as they were")
+        return html
     i = order.index(slug)
     targets = {"previous": order[i + 1] if i + 1 < len(order) else None,
                "next": order[i - 1] if i > 0 else None}
@@ -176,9 +192,9 @@ def write_extras(out):
     for name in os.listdir(extras):
         with open(os.path.join(extras, name), "rb") as src, open(os.path.join(out, name), "wb") as dst:
             dst.write(src.read())
-    urls = sorted("/" + os.path.relpath(root, out).replace(".", "").strip("/") + "/"
-                  for root, _, files in os.walk(out) if "index.html" in files)
-    entries = "".join(f"<url><loc>https://{DOMAIN}{u.replace('//', '/')}</loc></url>\n" for u in urls)
+    urls = sorted(page_url(root, out) for root, _, files in os.walk(out)
+                  if "index.html" in files and not in_wp_dir(root, out))
+    entries = "".join(f"<url><loc>https://{DOMAIN}{u}</loc></url>\n" for u in urls)
     with open(os.path.join(out, "sitemap.xml"), "w", encoding="utf-8") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n'
                 '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + entries + "</urlset>\n")
@@ -189,7 +205,7 @@ def main(raw, out):
     # google*.html verification files) live in the same tree.
     for root, _, files in os.walk(out):
         for name in files:
-            if (name == "index.html" or (name == "404.html" and root == out)) and "/wp-" not in root:
+            if (name == "index.html" or (name == "404.html" and root == out)) and not in_wp_dir(root, out):
                 os.remove(os.path.join(root, name))
     work = open(os.path.join(raw, "work/index.html"), encoding="utf-8").read()
     order = grid_order(drop_removed_items(work))
