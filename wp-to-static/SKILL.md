@@ -1,0 +1,74 @@
+---
+name: wp-to-static
+description: Convert a live WordPress site into a static site and replace it on the same host — crawl, rebuild, make it lighter without changing the design, clean the server, swap, flush cache. Use when someone wants to move a WordPress site to static, retire WordPress, get rid of plugins, or make an old WP site lighter while keeping it looking the same. Triggers on "wordpress to static", "convert wordpress", "static version of the site", "get rid of wordpress", "remove wordpress", "워드프레스 정적", or an SSH alias plus a WP site to migrate. Not for building a new site from scratch or for redesigns.
+---
+
+# WordPress → static, on the same host
+
+Used so far on three real sites: a creative agency's portfolio (Kalium theme, 29 pages), a Korean company site (Unicon theme + WPBakery, 178 pages) and a manufacturer's multilingual site, all on SiteGround. The scripts in `scripts/` come from the agency site, the most complete. Copy them into the new project's `static-build/` and adapt the site-specific constants at the top of each file (domain, SSH alias, removed items, contact text). Read them before running: they are templates, not a generic tool.
+
+Results: the agency site went from 2,219 to 727 KB per page on average (server folder 3.1 GB → 134 MB); the company site from 1,324 to 517 KB; every page EcoIndex A–B, no third-party requests on load.
+
+**Priorities: design first, eco second.** The site must look the same as live; every weight saving has to be invisible. Show the owner the result before anything goes live unless they've already asked to go live.
+
+## Ask up front (one message, not drip-fed)
+
+Answers that arrive mid-work, one at a time, cost rework. Ask these together at the start, with a recommended default for each:
+
+1. Content to remove (projects, pages, posts)? Check names against the real slugs — a project's display name and its slug often differ.
+2. Contact form → plain `mailto:` link (default) or a form via an automation tool (n8n, etc.)? Is the email still right?
+3. Office address / map still current?
+4. Which social links are alive and wanted?
+5. Trackers: drop dead ones (Universal Analytics stopped in 2023) — keep any live ones?
+6. After go-live: delete WordPress and the backup on the server too? Also ask whether to archive the full original photo library locally first — after prune, `site/` only has the photos the site uses, and the backup folder is the last full copy.
+7. Loose files in the docroot that no page links to (old PDFs, MP4s, decks)? Default: **remove** — only website files belong on the server. Move local copies to the Trash, don't hard-delete.
+8. Share buttons on posts (Facebook / Twitter / Pinterest / Google+…)? Default: **remove**. If kept, protect them from the root-relative rewrite: they pass the page/image URL to other sites and need it absolute.
+
+Apply without asking: when removing the form/map leaves a page shorter than the screen, keep the footer at the bottom (e.g. `.wrapall{display:flex;flex-direction:column;min-height:100vh}#page-wrap{flex:1 0 auto}` on that page) instead of showing the dark body background; a copyright year that updates itself; removal of WP search forms (they can't work); a dedicated 404 page; the eco measures below; and removal of orphan pages nothing links to when they're empty placeholders or broken (e.g. the theme's empty `/blog/`, a page showing raw shortcode) — skip them in `build.py` (`SKIP_PAGES`) and 301 them to `/`.
+
+**Keep** search-engine verification files (`naver*.html`, `google*.html`) — they prove site ownership to Naver/Google, even though no page links to them. Put them in `extras/` so every build writes them: a build that clears old `*.html` files can silently delete them, and the next `--delete` deploy takes them off the live site. Copy them byte for byte (Naver's file has no trailing newline).
+
+**404 page**: start from the theme's own 404 (crawl a nonsense URL) so it keeps the header/footer, then in `build.py` (`fix_404`) replace WordPress's "does not exist in our database" text with plain wording in the site's languages, links to home / work / contact, and `<meta name="robots" content="noindex">`. Wire it with `ErrorDocument 404 /404.html`; all its asset URLs must be root-relative so it renders at any depth. Check on the live site that a nonsense deep URL (`/a/b/c/`) returns status 404 *and* the styled page.
+
+## Pipeline (scripts/)
+
+1. **Inventory over SSH** with WP-CLI (`wp core version`, `wp theme list --status=active`, `wp plugin list --status=active`, `wp post list --post_type=page,post,<cpt>`, `wp option get permalink_structure`, `wp menu list`, `du -sh`). List root files that aren't WordPress (PDFs, MP4s, verification files, `.well-known`): verification files go into `extras/`, unlinked files get question 7, old `.well-known` leftovers (stale `acme-challenge` tokens) can go — the host recreates what SSL renewal needs. A `Default.html` from SiteGround is a placeholder; drop it.
+2. **Backup first**: `wp db export` into a folder *next to* the docroot (not inside it).
+3. **Crawl** (`crawl.sh`): wget recursive, skipping assets. Send a full Chrome User-Agent **and** `Accept: text/html` — SiteGround's bot filter returned a 403 page with a bare UA, and wget saved it as if it were content. Check every page for real content, not just exit codes. Fetch the 404 page too.
+4. **Build** (`build.py`): root-relative URLs (keep canonical / og: / JSON-LD absolute, handle the `https:\/\/` JSON-escaped form), strip WP head tags (incl. `text/xml+oembed`), dead gtag, unused scripts (RevSlider if no `rs-module` on any page, comment-reply). Removed items: drop grid tiles with a balanced-`<div>` cut and **rebuild prev/next links from the grid order** — WP's own chain can be inconsistent. Writes `.htaccess` (HTTPS, 301s for removed items and old WP paths, `ErrorDocument 404`, expires headers), robots.txt, sitemap.xml. It must clear only old `.html` files — deleting the whole output dir also deletes every fetched asset.
+5. **Assets** (`fetch_assets.py`): rsync only the files the HTML references from the server, then follow `url()` in CSS recursively. macOS rsync is openrsync: no `--ignore-missing-args`; accept exit 23. Copy the theme's `assets/` dir whole only as a first pass — prune later.
+6. **Eco, design-neutral** (`eco.py`) — see below.
+7. **Audit** (`audit.py`, Playwright): every page, desktop and `--mobile`, scroll to bottom, records bytes/requests/DOM/EcoIndex and writes `used.txt` (files actually requested). Use `wait_until="load"` + a pause — `networkidle` never fires with YouTube. Install: `python3 -m venv venv && venv/bin/pip install playwright && venv/bin/python -m playwright install chromium`. Save a baseline against the live site first so you can report before/after.
+8. **Prune** (`prune.py`): delete everything under wp-content/wp-includes not referenced by HTML/CSS and not in `used-*.txt`. Dry run first. **Normalize filenames to NFC** before comparing — Korean filenames uploaded from macOS are NFD on disk and may differ from the HTML, and a mismatch means deleting images that are in use.
+9. **Preview** (`serve.py site 8766`, gzip like the host) and compare against live with Playwright: full-page screenshots of live vs local per page, desktop and iPhone, plus a Pillow pixel diff — only intended changes should differ. Check: each page type, the work grid, a project with lightbox (open it, check the arrows), mobile menu, console errors. YouTube shows "Playback on other websites has been disabled" on localhost when the owner restricts embed domains — not a bug, recheck on the real domain.
+10. **Deploy**: rsync to `static-new/` next to `public_html`, hard-link the root extras in (`cp -al`), copy `.well-known`, then swap with two `mv`s (WP folder into the backup folder). Rollback = reverse the `mv`s. Later updates: `rsync -az --delete --exclude=.DS_Store site/ host:.../public_html/` — `--delete` is what removes unused files from the server. Exclude `.DS_Store`, and remember excluded files are also never deleted on the server (`find … -name .DS_Store -delete` there).
+11. **Flush the host's cache** or old WordPress HTML keeps being served. On SiteGround: `ssh <alias> 'site-tools-client domain-all update id=<domain> flush_cache=1 "path=/(.*)"'`. Verify with curl using markers that exist only in the old HTML (e.g. `googletagmanager`, the old form class) — `wp-json` is a bad marker because an oEmbed link can still contain it.
+12. Keep the local `site/` as the complete docroot **before** anything is deleted on the host, so one rsync restores everything. After deploying, confirm the mirror: `rsync -an --delete --checksum --itemize-changes site/ host:…/public_html/` should list nothing, and curl the verification file. SiteGround's "uninstall WordPress" in Site Tools only removes the app registration/DB — the docroot files stay.
+
+## Eco measures that kept the design identical
+
+- **YouTube → click-to-play preview**: self-hosted WebP thumbnail (oEmbed title + `i.ytimg.com` maxres, cached in `cache/youtube/`), drawn the way each embed looked before (YouTube red button + title for iframes; the theme's own play circle for video.js). Loads `youtube-nocookie.com` with autoplay on click. Then drop video.js / Vimeo / videojs-youtube scripts — Kalium guards with `typeof videojs`. Biggest single win (~1 MB per video page).
+- Lightboxes that attach by file extension (e.g. prettyPhoto: `$('a[href$=jpg], …')`) ignore `.webp` links — add `a[href$=webp]` to the selector, then open one and step through with the arrows. Favicons / apple-touch-icons must stay PNG (iOS) — `eco.py` protects them.
+- **WebP siblings** `image.jpg.webp`, kept only if <90 % of the original; og:/JSON-LD keep the JPG. PNGs: encode **both** lossy (`-q 82 -alpha_q 100`) and lossless, keep lossless only if ≤1.3× lossy. macOS screenshots have an unused alpha channel — "has alpha → lossless" leaves 1–2 MB photo PNGs untouched. Once prune deletes the replaced originals, `.htaccess` 301s a missing `uploads/*.jpg|png` to its `.webp` sibling so old direct image links keep working — it's in `scripts/extras/.htaccess`.
+- **Rewrite absolute URLs inside theme CSS** to root-relative. Otherwise icon fonts break in local preview (cross-origin) and the local audit misses them, so prune would delete them.
+- **Fonts**: count `<link rel="preload" as="font">` and inline `@font-face` per page. On one site a speed plugin preloaded 28 Google woff2 files of an older version that no rule used *and* inlined `@font-face` rules pointing at full, unsubsetted TTFs (~490 KB of fonts per page). Fix: drop the preloads/preconnects, self-host the same families from Google's `css2` API (Chrome UA → woff2 with `unicode-range`, so only Latin downloads) in one cached `fonts.css` — the biggest win there. Generally: check which `@font-face` is actually applied. Themes often preload fonts no text uses, or a line-icon font on every page — drop those preloads. `class="fa flaticon-…"` can pull an 80 KB Font Awesome file for no visible glyph; drop the `fa`.
+- Remove dead trackers. No autoplay video, no heavy hero changes — that would be design work, ask first.
+- Kalium loads YouTube's `iframe_api` for any `.video.video-youtube` wrapper even with no iframe left — drop that class on facade wrappers. Check the audit's host list: on load there should be **no third-party requests at all**.
+
+## Say it on the site: eco note in the footer
+
+Always add a short eco note under the copyright, in the site's languages, in the brand's voice (tie it to what the company makes or stands for). One site saves little on its own; the note is how visitors learn that websites use energy at all, and when many sites say it, expectations change. Say only what is true and checkable:
+- static pages, no database, no trackers (verify with the audit host list), videos load only on play;
+- **no green-hosting claim by default** — the host may change and the line would silently become false. Lead with intent instead: "Built with the environment in mind: light static pages, no database, no trackers." / "환경을 생각해 만든 웹사이트입니다. 데이터베이스와 추적 도구 없이 가벼운 정적 페이지로 운영됩니다." Mention green hosting only if the owner asks for it and `curl -s https://api.thegreenwebfoundation.org/api/v3/greencheck/<domain>` returns `"green":true`, worded as "servers the Green Web Foundation lists as green" with a link to `https://www.thegreenwebfoundation.org/green-web-check/?url=<domain>`.
+
+Small text (12px), same grey as the copyright, no leaf icons or green colours unless the brand has them. Don't put a CO₂ or KB figure in it unless it's measured for that page and re-measured when content changes. If the owner wants a grade: the Website Carbon result as a **plain link** to `https://www.websitecarbon.com/website/<domain-with-dashes>/` — never their badge script, which loads a third-party script on every page and breaks the no-trackers claim — plus a learn-more link to `https://sustainablewebdesign.org/`.
+
+## Working notes
+
+- Re-encoding hundreds of PNGs losslessly takes 10+ minutes: run it in the background and say what's happening.
+- Chain script edits and the long run after them with `&&`, and make the edit fail loudly (assert the old text is present). Once an edit failed, the next command ran anyway after `;`, and a 10-minute re-encode used the old rule.
+- Don't depend on changing WordPress itself (writing to its database over SSH may be blocked or risky); do removals in the build.
+- Let the owner delete the server backup folder themselves (e.g. Site Tools → File Manager): prepare everything (local DB dump copy, optional full photo-library archive), then hand them the exact path. After a WordPress uninstall in Site Tools, check the database is really gone (`wp db check` against the backup's wp-config may still answer) and tell them to remove it under Site Tools → MySQL if not.
+- **After the swap, look at where the server is.** A converted site on a server far from its visitors is still slow (a Korean site on a Singapore server: ~1.2 s for the home page HTML from Seoul vs ~0.04 s from a Seoul CDN edge). Know the audience: one region → a host there; worldwide → a CDN. See the `eco-web` skill's "Server location" notes.
+- **Record the numbers**, before (live WP, measured before the swap) and after: Website Carbon grade and grams per visit for the home page plus 2 inner pages, the audit's average KB, the server folder size, and the AI energy if an AI assistant did the work. Say which savings came from eco-design (fonts, images, video, trackers) and which from going static (server, storage, plugins).
+- Name a client site publicly only with their OK.
