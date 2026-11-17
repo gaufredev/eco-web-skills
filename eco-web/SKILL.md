@@ -89,9 +89,12 @@ These require zero design decisions. Just do them.
 - Hangul fonts are huge: Pretendard 1.3.9 Regular is **748 KB** per weight as a full woff2, the variable version **~2.0 MB** — more than a whole light website. Two weights = 1.5 MB before any text shows
 - Lightest: system fonts (`-apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`) — 0 KB, and they look native on each device
 - If the brand font is required: use a **dynamic subset** (Pretendard ships one: 92 `unicode-range` pieces per weight; the browser downloads only the pieces a page needs) and load only the weights actually used
+- **Check which elements the Korean font actually styles** (search the CSS for its `font-family` or variable), not just that it loads. On one café site a 79 KB self-made subset with 456 Hangul characters rendered a single tagline; all other Korean text was in the system font, because the body stack had no Korean font. A subset with only that tagline's characters, instanced to the one weight used (fontTools `instancer`, variable 28 KB → static 15 KB), looked the same
+- **Careful with a Hangul-only `unicode-range`** when the font also sets Latin text (a mixed Korean/English line): the English words would switch to the fallback font. Use a smaller subset instead
 
 **Caching & compression**:
-- Set `Cache-Control: public, max-age=31536000, immutable` for static assets with hashed filenames. **Don't forget AVIF**: `.htaccess` cache rules often list `jpg|jpeg|webp|png` but miss `avif` — add `image/avif` to both `ExpiresByType` and `FilesMatch` rules
+- Set `Cache-Control: public, max-age=31536000, immutable` for static assets with hashed filenames. **Don't forget AVIF**: `.htaccess` cache rules often list `jpg|jpeg|webp|png` but miss `avif` — add `image/avif` to both `ExpiresByType` and `FilesMatch` rules. Check every type the page serves with `curl -I`, since the gap can be anywhere (one site cached AVIF and fonts for a year but sent no cache header at all for PNG and ICO)
+- **A year of cache on a fixed file name means a regenerated file reaches returning visitors late.** This bites self-made font subsets most: new characters stay missing for a year. Version the URL in the page (`font.woff2?v=<first 8 chars of md5>`) and have the build script update it
 - Enable **Brotli** compression on the server (7-13% better than gzip on JS/CSS)
 - Use ETags for dynamic content
 
@@ -129,6 +132,10 @@ Small code changes or build step additions. Shouldn't affect the look of the sit
 - **Conversion tools**: `avifenc` (from `brew install libavif`) for AVIF, `cwebp` (from `brew install webp`) for WebP. Resize first with `sips --resampleWidth 800`, then convert. Quality flags: `avifenc --min 20 --max 35 --speed 6` and `cwebp -q 80`
 - **Real-world results**: The author's own site (julianquintart.com) went from **16.6 MB → 249 KB** (98.5% reduction) by resizing images to display dimensions and converting to AVIF/WebP. Profile images (800px wide): 19-32 KB AVIF. Activity photos (600px wide): 22-53 KB AVIF
 - Serve at exact display dimensions — never rely on CSS to downscale. A 4032×3024 photo displayed at 600px is wasting 97% of its pixels
+- **Make `sizes` match the measured width, not a guess.** Measure the image's CSS width in a browser at 360, 390, 430 px and on desktop: a padded, capped column is not `90vw`. On one site a photo shown at 294 px on a 390 px phone (never wider than 380 px) had `sizes="(max-width: 768px) 90vw, 380px"`, so every 3x phone downloaded the 1600w file (219 KB). With `sizes="(max-width: 475px) calc(100vw - 96px), 380px"` and a 1000w version it got 79 KB at the same quality. No device needs more than the widest CSS width × 3, so don't list a bigger candidate
+- **Test pages in subfolders on a 3x phone viewport.** A wrong relative path in one `srcset` candidate (`img/x-1600.avif` on `/ko/` instead of `../img/…`) only breaks for devices that pick that candidate, so a desktop check misses it. A failing `<source>` does **not** fall back to `<img src>`: the photo shows as broken. In the request list, watch for ~3 KB "images" (the 404 page). A page that is suddenly lighter on one device may be lighter because it's broken
+- **Keep a new size at exactly the same aspect ratio** as the other files in the srcset. Otherwise everything below the image moves by a fraction of a pixel (1000×668 vs 1600×1068 moved 0.4 device px). Pick widths that keep the ratio exactly, or pin the box with `aspect-ratio: 1200 / 801`
+- **"Same quality" is something you can measure:** resize the original to the same width with `lanczos`, compute the SSIM of the current file against it (`ffmpeg -lavfi ssim`), then use the smallest new encode that scores at least as high. Encode from the original, never from an existing AVIF/WebP
 - **Avoid GIFs entirely** — use short `<video>` loops (MP4/WebM, 80-90% smaller) or CSS animations
 - **Favicons**: Convert simple favicon PNGs to inline SVG data URIs (`<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,...">`) — eliminates an HTTP request and reduces ~17KB PNG to <1KB inline SVG
 
@@ -317,6 +324,15 @@ These are best decided at project start. Retrofitting is harder but possible.
 
 ---
 
+## Lighter Without Changing the Look — How to Prove It
+
+When the brief is "same design, fewer bytes", compare full-page screenshots before and after, pixel by pixel (Playwright + pixelmatch, or Pillow), at desktop and at a 390 px 3x phone:
+- **Run the "before" site against itself first.** The diff must be 0 px. Then every pixel that differs later is real, not noise.
+- **`font-display: optional` fonts only appear from cache.** With a cold cache they often don't render in time, so the screenshot shows the fallback font. Load the page once, reload, then screenshot.
+- **Diff at threshold 0 to find every change, and at the perceptual default (0.1) to judge it.** Group the differing rows into bands and explain each one. Rows of text changing far below an edited image usually mean a sub-pixel layout shift from a different aspect ratio (see Images), not changed text.
+- A font rebuilt with fontTools (subset or static instance) can change only the anti-aliasing at the letter edges: same shapes and positions, ~0 px at the perceptual threshold. That counts as unchanged.
+- **Audit before you cut code.** The "inline JS" in a size count may be mostly JSON-LD (structured data for search, keep it). Unused-CSS checks must add the classes JS sets (`open`, `visible`, `scrolled`, `[aria-expanded="true"]`) before calling a rule dead. On a hand-edited site with no build step, minifying ~27 KB of CSS saved ~0.9 KB compressed and isn't worth the harder editing.
+
 ## Quick Reference: Eco-Score Optimization Targets
 
 | Metric | Poor | Acceptable | Good | Excellent |
@@ -356,7 +372,7 @@ This is the single highest-impact-per-effort action in this entire skill. A simp
 - Rate from measured bytes, no API key needed: `curl -s "https://api.websitecarbon.com/data?bytes=<compressed transfer bytes>&green=0"` (use `green=1` only if the Green Web Check says green). Python's urllib gets a 403 from this API; curl works.
 - **Never embed the Website Carbon badge script** — it loads a third-party script on every page and breaks a "no trackers" claim. Link to the result page instead.
 - **No green-hosting claim by default** — hosts change and the line silently becomes false. If it's checked green, say "hosted on servers the Green Web Foundation lists as green", linking to the check, not "powered by renewable energy".
-- Measure weight the same way every time: Playwright (Chromium) with the cache disabled, scroll to the bottom so lazy images load, and sum CDP `Network.loadingFinished` `encodedDataLength` (the compressed bytes actually transferred).
+- Measure weight the same way every time: Playwright (Chromium) with the cache disabled, scroll to the bottom so lazy images load, and sum CDP `Network.loadingFinished` `encodedDataLength` (the compressed bytes actually transferred). Headless Chromium doesn't fetch the favicon, so real browsers add its size on a first visit. Measure desktop **and** a 390 px 3x phone, because srcset makes them download different files.
 
 When building any website or tool, always add an eco-friendly statement that explains the lightweight choices made. Include it in:
 - **A visible footer/footnote on the website itself** — this is the most important placement
