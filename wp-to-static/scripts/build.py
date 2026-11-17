@@ -125,13 +125,26 @@ def fix_contact(html: str) -> str:
 
 
 GREEN_CHECK = "https://www.thegreenwebfoundation.org/green-web-check/?url=example.com"
+# Website Carbon rating as a plain link (never their badge script: a third-party
+# request on every page). Test the live site after the swap and after later weight
+# work, then fill in the grade and the % (from data-count in their page source).
+CARBON_URL = "https://www.websitecarbon.com/website/example-com/"
+CARBON_GRADE, CARBON_PCT = "A+", 97
+ECO_WEB = "https://julianquintart.com/eco-web/en/"  # or https://sustainablewebdesign.org/
+ECO_WEB_KO = "https://julianquintart.com/eco-web/"
+A = 'target="_blank" rel="noopener" style="color:inherit;text-decoration:underline"'
 ECO_NOTE = (
-    '<div class="container eco-note" style="padding-bottom:24px;font-size:12px;line-height:1.6;color:#777">'
-    '<p style="margin:0">Built light: static pages, no database, no trackers, and videos that load only when you press play.</p>'
-    # Add a green-hosting line only if the Green Web Check says green, and word it as
+    # word-break:keep-all keeps Korean words whole when lines wrap on phones.
+    '<div class="container eco-note" style="padding-bottom:24px;font-size:12px;line-height:1.6;color:#777;word-break:keep-all">'
+    '<p style="margin:0">Built light: static pages, no database, no trackers, and videos that load only when you press play. '
+    # Add a green-hosting sentence only if the Green Web Check says green, and word it as
     # "servers the Green Web Foundation lists as green" with a link to {GREEN_CHECK}.
     # Hosts change; a stale green claim is worse than none.
-    '<p style="margin:0">가볍게 만든 웹사이트입니다. 데이터베이스와 추적 도구 없이 정적 페이지로 운영되며, 영상은 재생할 때만 불러옵니다.</p></div>'
+    f'<a href="{CARBON_URL}" {A}>Website Carbon rating {CARBON_GRADE}</a>, cleaner than {CARBON_PCT}% of web pages worldwide. '
+    f'<a href="{ECO_WEB}" {A}>Learn more about eco design</a>.</p>'
+    '<p style="margin:0">가볍게 만든 웹사이트입니다. 데이터베이스와 추적 도구 없이 정적 페이지로 운영되며, 영상은 재생할 때만 불러옵니다. '
+    f'<a href="{CARBON_URL}" {A}>Website Carbon 등급 {CARBON_GRADE}</a> (전 세계 웹페이지의 {CARBON_PCT}%보다 깨끗함). '
+    f'<a href="{ECO_WEB_KO}" {A}>친환경 웹디자인 더 알아보기</a>.</p></div>'
 )
 
 
