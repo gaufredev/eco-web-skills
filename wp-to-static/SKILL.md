@@ -70,7 +70,7 @@ Small text (12px), same grey as the copyright, no leaf icons or green colours un
 1. The **Website Carbon rating** as a **plain link** to `https://www.websitecarbon.com/website/<domain-with-dashes>/` ("Website Carbon rating A+, cleaner than 97% of web pages worldwide") — never their badge script, which loads a third-party script on every page and breaks the no-trackers claim. Test *after* the swap and again after any later weight work: their page has a "Test again" form that POSTs `wgd-cc-url=<https://domain/>` and `wgd-cc-retest=true` to `https://www.websitecarbon.com/`. The grade loads by JS, so read the percentage from `data-count` in the page source. On one site a CSS/image round moved it from B · 0.13 g (68 %) to A+ · 0.016 g (97 %) — retesting is what makes the footer true.
 2. A **learn-more link** to an eco-design explainer in the visitor's language — the author's own guide, https://julianquintart.com/eco-web/en/ (Korean: https://julianquintart.com/eco-web/), or `https://sustainablewebdesign.org/` (the model Website Carbon uses). Mark links to a page in another language, e.g. "(영문)".
 
-`build.py`'s `ECO_NOTE` has a template with `CARBON_GRADE` / `CARBON_PCT` constants. Give the note `word-break:keep-all` — without it Korean lines break mid-word on phones.
+`build.py`'s `ECO_NOTE` has a template with `CARBON_GRADE` / `CARBON_PCT` constants. Give the note `word-break:keep-all` — without it Korean lines break mid-word on phones. Hover a footer link before shipping: themes often draw their own hover line (Kalium's animated `a::after`), and an inline underline on top showed two lines — the template's `ECO_LINK_CSS` gives a soft underline at rest and hides it on hover so the theme's line takes over.
 
 ## Working notes
 

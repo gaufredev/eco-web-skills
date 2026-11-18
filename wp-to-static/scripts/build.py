@@ -132,10 +132,18 @@ CARBON_URL = "https://www.websitecarbon.com/website/example-com/"
 CARBON_GRADE, CARBON_PCT = "A+", 97
 ECO_WEB = "https://julianquintart.com/eco-web/en/"  # or https://sustainablewebdesign.org/
 ECO_WEB_KO = "https://julianquintart.com/eco-web/"
-A = 'target="_blank" rel="noopener" style="color:inherit;text-decoration:underline"'
+A = 'target="_blank" rel="noopener"'
+# Themes often draw their own hover line under footer links (Kalium: an animated 1px
+# a::after). A plain underline on top showed two lines; so at rest a soft underline
+# marks the link and on hover it fades out while the theme's line slides in. On a theme
+# without its own hover effect, darken the underline on hover instead of hiding it.
+ECO_LINK_CSS = ('<style>.eco-note a{color:inherit;text-decoration:underline;text-decoration-color:rgba(119,119,119,.5);'
+                'text-underline-offset:2px;transition:text-decoration-color .2s}'
+                '.eco-note a:hover,.eco-note a:focus-visible{text-decoration-color:transparent}</style>')
 ECO_NOTE = (
     # word-break:keep-all keeps Korean words whole when lines wrap on phones.
     '<div class="container eco-note" style="padding-bottom:24px;font-size:12px;line-height:1.6;color:#777;word-break:keep-all">'
+    + ECO_LINK_CSS +
     '<p style="margin:0">Built light: static pages, no database, no trackers, and videos that load only when you press play. '
     # Add a green-hosting sentence only if the Green Web Check says green, and word it as
     # "servers the Green Web Foundation lists as green" with a link to {GREEN_CHECK}.
